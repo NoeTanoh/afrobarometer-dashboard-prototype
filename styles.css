@@ -552,6 +552,33 @@ article,
   r: 9;
 }
 
+.country-node,
+.bar-row,
+.chart-dot,
+.distribution-bin {
+  cursor: pointer;
+}
+
+.bar-row:hover .bar-label,
+.bar-row.is-selected-row .bar-label {
+  color: var(--ab-orange-dark);
+}
+
+.bar-row:hover .bar-fill {
+  filter: saturate(1.15) brightness(0.95);
+}
+
+.distribution-bin {
+  transition: opacity 160ms ease, transform 160ms ease;
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
+
+.distribution-bin:hover {
+  opacity: 0.88;
+  transform: scaleY(1.04);
+}
+
 .panel-title {
   display: flex;
   justify-content: space-between;
@@ -810,6 +837,34 @@ th:last-child {
 .toast.is-visible {
   transform: translateY(0);
   opacity: 1;
+}
+
+.data-tooltip {
+  position: fixed;
+  z-index: 80;
+  max-width: 280px;
+  padding: 0.72rem 0.82rem;
+  background: rgba(17, 17, 17, 0.94);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-999px, -999px) scale(0.98);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.data-tooltip.is-visible {
+  opacity: 1;
+}
+
+.data-tooltip strong {
+  display: block;
+  margin-bottom: 0.18rem;
+  color: #ffb29b;
+  font-size: 0.8rem;
 }
 
 @media (max-width: 1100px) {

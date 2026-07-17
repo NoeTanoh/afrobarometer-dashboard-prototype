@@ -74,8 +74,78 @@ const COORDS = {
   ZIM: [29.2, -19.0],
 };
 
-const AFRICA_OUTLINE =
-  "M345 34 L405 42 L463 86 L509 143 L541 214 L530 279 L557 333 L538 396 L489 438 L468 499 L416 484 L376 421 L339 405 L314 346 L278 332 L241 283 L202 261 L186 202 L205 143 L240 93 L291 72 Z";
+const AFRICA_MAIN = [
+  [-17.5, 37.2],
+  [-8.5, 36.0],
+  [1.0, 36.8],
+  [10.5, 37.2],
+  [20.0, 33.0],
+  [29.0, 31.0],
+  [32.5, 27.5],
+  [31.0, 24.0],
+  [35.2, 21.5],
+  [40.8, 14.8],
+  [49.8, 11.4],
+  [51.4, 5.4],
+  [47.0, 2.0],
+  [43.5, 0.0],
+  [46.6, -6.5],
+  [43.0, -11.8],
+  [39.5, -17.0],
+  [35.2, -22.4],
+  [31.2, -28.5],
+  [27.4, -33.8],
+  [20.0, -34.8],
+  [15.5, -30.2],
+  [13.0, -25.4],
+  [8.2, -21.2],
+  [4.0, -18.2],
+  [0.8, -13.6],
+  [-5.4, -8.5],
+  [-8.8, -2.0],
+  [-13.0, 4.2],
+  [-16.0, 10.4],
+  [-17.2, 17.8],
+  [-14.0, 25.0],
+  [-17.5, 37.2],
+];
+
+const MADAGASCAR = [
+  [47.0, -12.2],
+  [49.4, -16.0],
+  [50.0, -21.8],
+  [47.5, -25.5],
+  [44.8, -23.0],
+  [44.5, -17.0],
+  [47.0, -12.2],
+];
+
+const EURASIA_HINT = [
+  [-10, 36],
+  [2, 47],
+  [18, 46],
+  [31, 42],
+  [44, 36],
+  [55, 30],
+  [52, 22],
+  [43, 25],
+  [34, 30],
+  [26, 33],
+  [12, 35],
+  [-2, 36],
+  [-10, 36],
+];
+
+const SOUTH_AMERICA_HINT = [
+  [-82, 10],
+  [-64, 8],
+  [-46, -5],
+  [-38, -22],
+  [-52, -55],
+  [-66, -45],
+  [-76, -18],
+  [-82, 10],
+];
 
 const state = {
   metric: "right_direction_pct",
@@ -99,6 +169,7 @@ const globe = {
   currentLat: 0,
   targetLon: 24,
   targetLat: 0,
+  orbit: 0,
   raf: null,
 };
 
@@ -139,6 +210,7 @@ const els = {
   storyMetric: document.getElementById("storyMetric"),
   storyRank: document.getElementById("storyRank"),
   storyDelta: document.getElementById("storyDelta"),
+  dataTooltip: document.getElementById("dataTooltip"),
 };
 
 init();
@@ -164,6 +236,8 @@ async function init() {
 }
 
 function bindEvents() {
+  bindTooltipEvents();
+
   els.metricSelect.addEventListener("change", (event) => {
     state.metric = event.target.value;
     render();
@@ -343,8 +417,12 @@ function renderMap(rows, focus) {
       const value = row[state.metric];
       const active = rowByCode.has(row.country_code);
       const selected = row.country === focus.country;
+      const tooltip = tooltipHtml(
+        displayCountry(row.country),
+        `${METRICS[state.metric].short}: ${formatPercent(value)}<br>Respondents: ${formatNumber(row.respondents)}`
+      );
       return `
-        <g class="country-node" data-country="${escapeAttr(row.country)}" tabindex="0" role="button" aria-label="${escapeAttr(displayCountry(row.country))} ${formatPercent(value)}">
+        <g class="country-node" data-country="${escapeAttr(row.country)}" data-tooltip="${escapeAttr(tooltip)}" tabindex="0" role="button" aria-label="${escapeAttr(displayCountry(row.country))} ${formatPercent(value)}">
           <title>${escapeHtml(displayCountry(row.country))} - ${escapeHtml(METRICS[state.metric].short)}: ${formatPercent(value)}</title>
           <circle class="country-dot ${selected ? "is-selected" : ""}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${selected ? 12 : 8}" fill="${colorFor(value, METRICS[state.metric].polarity)}" opacity="${active ? 0.95 : 0.2}"></circle>
           ${selected || value >= 70 || value <= 15 ? `<text class="country-label" x="${(x + 12).toFixed(1)}" y="${(y - 9).toFixed(1)}">${escapeHtml(row.country_code)}</text>` : ""}
@@ -355,7 +433,8 @@ function renderMap(rows, focus) {
 
   els.mapContainer.innerHTML = `
     <svg id="africaMap" viewBox="0 0 ${width} ${height}" role="img" aria-label="Dot map of African countries in this prototype">
-      <path class="map-outline" d="${AFRICA_OUTLINE}"></path>
+      <path class="map-outline" d="${flatPath(AFRICA_MAIN)}"></path>
+      <path class="map-outline" d="${flatPath(MADAGASCAR)}"></path>
       <g>${dots}</g>
     </svg>
   `;
@@ -439,8 +518,13 @@ function renderDistribution(rows, focus) {
       const x = pad.left + index * (innerWidth / bins.length) + barGap / 2;
       const y = pad.top + innerHeight - h;
       const active = focusValue >= bin.min && (focusValue < bin.max || bin.max === 100);
+      const countries = bin.rows.map((row) => displayCountry(row.country)).slice(0, 6).join(", ");
+      const tooltip = tooltipHtml(
+        `${bin.min}-${bin.max}%`,
+        `${bin.rows.length} countr${bin.rows.length === 1 ? "y" : "ies"}<br>${countries || "No country in this range"}`
+      );
       return `
-        <rect x="${x}" y="${y}" width="${barWidth}" height="${h}" rx="3" fill="${active ? "#f25528" : "#d8d8de"}"></rect>
+        <rect class="distribution-bin" data-tooltip="${escapeAttr(tooltip)}" x="${x}" y="${y}" width="${barWidth}" height="${h}" rx="3" fill="${active ? "#f25528" : "#d8d8de"}"></rect>
         <text class="chart-label" x="${x + barWidth / 2}" y="${height - 18}" text-anchor="middle">${bin.min}</text>
       `;
     })
@@ -487,8 +571,12 @@ function renderScatter(focus) {
       const x = pad.left + (Number(row[xKey] || 0) / 100) * innerWidth;
       const y = pad.top + innerHeight - (Number(row[yKey] || 0) / 100) * innerHeight;
       const selected = row.country === focus.country;
+      const tooltip = tooltipHtml(
+        displayCountry(row.country),
+        `Economy good: ${formatPercent(row[xKey])}<br>Living good: ${formatPercent(row[yKey])}<br>${METRICS[state.metric].short}: ${formatPercent(row[state.metric])}`
+      );
       return `
-        <g tabindex="0" role="button" data-country="${escapeAttr(row.country)}" aria-label="${escapeAttr(displayCountry(row.country))}">
+        <g tabindex="0" role="button" data-country="${escapeAttr(row.country)}" data-tooltip="${escapeAttr(tooltip)}" aria-label="${escapeAttr(displayCountry(row.country))}">
           <title>${escapeHtml(displayCountry(row.country))}: economy ${formatPercent(row[xKey])}, living ${formatPercent(row[yKey])}</title>
           <circle class="chart-dot ${selected ? "is-selected" : ""}" cx="${x}" cy="${y}" r="${selected ? 9 : 6}" fill="${selected ? "#f25528" : "#111"}" opacity="${selected ? 1 : 0.56}"></circle>
           ${selected ? `<text class="chart-label" x="${x + 12}" y="${y - 10}">${escapeHtml(displayCountry(row.country))}</text>` : ""}
@@ -538,12 +626,12 @@ function renderComparison(focus, compare) {
       const compareValue = Number(compare[key] || 0);
       return `
         <div class="compare-item">
-          <div class="bar-row">
+          <div class="bar-row" data-tooltip="${escapeAttr(tooltipHtml(displayCountry(focus.country), `${metric.short}: ${formatPercent(focusValue)}`))}">
             <span class="bar-label">${escapeHtml(metric.short)}</span>
             <div class="bar-track"><div class="bar-fill" style="width:${focusValue}%; background:${colorFor(focusValue, metric.polarity)}"></div></div>
             <span class="bar-value">${formatPercent(focusValue)}</span>
           </div>
-          <div class="bar-row">
+          <div class="bar-row" data-tooltip="${escapeAttr(tooltipHtml(displayCountry(compare.country), `${metric.short}: ${formatPercent(compareValue)}`))}">
             <span class="bar-label muted-label">${escapeHtml(displayCountry(compare.country))}</span>
             <div class="bar-track"><div class="bar-fill" style="width:${compareValue}%; background:#111"></div></div>
             <span class="bar-value">${formatPercent(compareValue)}</span>
@@ -616,8 +704,9 @@ function renderInsights(rows, focus, compare) {
 
 function barRow({ label, country = label, value, fill = "var(--ab-orange)", selected = false }) {
   const safeValue = clamp(Number(value || 0), 0, 100);
+  const tooltip = tooltipHtml(label, `${METRICS[state.metric]?.short || "Value"}: ${formatPercent(safeValue)}`);
   return `
-    <div class="bar-row ${selected ? "is-selected-row" : ""}" data-country="${escapeAttr(country)}">
+    <div class="bar-row ${selected ? "is-selected-row" : ""}" data-country="${escapeAttr(country)}" data-tooltip="${escapeAttr(tooltip)}" tabindex="0">
       <span class="bar-label">${escapeHtml(label)}</span>
       <div class="bar-track"><div class="bar-fill" style="width:${safeValue}%; background:${fill}"></div></div>
       <span class="bar-value">${formatPercent(safeValue)}</span>
@@ -705,6 +794,78 @@ function renderError(error) {
   console.error(error);
 }
 
+function bindTooltipEvents() {
+  document.addEventListener("mouseover", (event) => {
+    const target = event.target.closest("[data-tooltip]");
+    if (!target) return;
+    showDataTooltip(target.dataset.tooltip, event.clientX, event.clientY);
+  });
+
+  document.addEventListener("mousemove", (event) => {
+    if (!els.dataTooltip.classList.contains("is-visible")) return;
+    moveDataTooltip(event.clientX, event.clientY);
+  });
+
+  document.addEventListener("mouseout", (event) => {
+    if (!event.target.closest("[data-tooltip]")) return;
+    hideDataTooltip();
+  });
+
+  document.addEventListener("focusin", (event) => {
+    const target = event.target.closest("[data-tooltip]");
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    showDataTooltip(target.dataset.tooltip, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  });
+
+  document.addEventListener("focusout", (event) => {
+    if (!event.target.closest("[data-tooltip]")) return;
+    hideDataTooltip();
+  });
+}
+
+function showDataTooltip(content, x, y) {
+  if (!content) return;
+  els.dataTooltip.innerHTML = content;
+  els.dataTooltip.setAttribute("aria-hidden", "false");
+  els.dataTooltip.classList.add("is-visible");
+  moveDataTooltip(x, y);
+}
+
+function moveDataTooltip(x, y) {
+  const margin = 16;
+  const rect = els.dataTooltip.getBoundingClientRect();
+  const left = Math.min(window.innerWidth - rect.width - margin, Math.max(margin, x + 14));
+  const top = Math.min(window.innerHeight - rect.height - margin, Math.max(margin, y + 14));
+  els.dataTooltip.style.transform = `translate(${left}px, ${top}px) scale(1)`;
+}
+
+function hideDataTooltip() {
+  els.dataTooltip.classList.remove("is-visible");
+  els.dataTooltip.setAttribute("aria-hidden", "true");
+}
+
+function tooltipHtml(title, body) {
+  const safeBody = String(body)
+    .split("<br>")
+    .map((part) => escapeHtml(part))
+    .join("<br>");
+  return `<strong>${escapeHtml(title)}</strong>${safeBody}`;
+}
+
+function flatPath(points) {
+  return points
+    .map(([lon, lat], index) => {
+      const [x, y] = flatProject(lon, lat);
+      return `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(" ") + " Z";
+}
+
+function flatProject(lon, lat) {
+  return [(lon + 26) * 7.85, (36 - lat) * 7.25];
+}
+
 function showToast(message) {
   els.toast.textContent = message;
   els.toast.classList.add("is-visible");
@@ -718,13 +879,22 @@ function updateGlobeTarget(focus) {
   globe.targetLat = coord[1];
   els.globeCountry.textContent = displayCountry(focus.country);
   els.globeMeta.textContent = `${formatPercent(focus[state.metric])} on ${METRICS[state.metric].short.toLowerCase()} · ${formatNumber(focus.respondents)} respondents`;
+  if (globe.canvas) {
+    globe.canvas.dataset.tooltip = tooltipHtml(
+      `Globe focus: ${displayCountry(focus.country)}`,
+      `${METRICS[state.metric].short}: ${formatPercent(focus[state.metric])}<br>Respondents: ${formatNumber(focus.respondents)}`
+    );
+  }
   if (!globe.ctx && globe.canvas) globe.ctx = globe.canvas.getContext("2d");
   if (!globe.raf) animateGlobe();
 }
 
 function animateGlobe() {
-  globe.currentLon += shortestAngle(globe.currentLon, globe.targetLon) * 0.075;
-  globe.currentLat += (globe.targetLat - globe.currentLat) * 0.075;
+  globe.orbit += 0.018;
+  const orbitalLon = globe.targetLon + Math.sin(globe.orbit) * 14;
+  const orbitalLat = globe.targetLat + Math.cos(globe.orbit * 0.8) * 3;
+  globe.currentLon += shortestAngle(globe.currentLon, orbitalLon) * 0.075;
+  globe.currentLat += (orbitalLat - globe.currentLat) * 0.075;
   drawGlobe();
   globe.raf = window.requestAnimationFrame(animateGlobe);
 }
@@ -786,19 +956,14 @@ function drawGraticule(ctx, cx, cy, radius) {
 }
 
 function drawLandMasses(ctx, cx, cy, radius) {
-  const africa = [
-    [-17, 35], [5, 37], [24, 32], [35, 24], [44, 12], [49, -1], [43, -12], [39, -24],
-    [31, -34], [20, -35], [15, -23], [8, -14], [-3, -7], [-10, 3], [-17, 14], [-16, 25], [-17, 35],
-  ];
-  const europe = [[-11, 36], [2, 46], [18, 47], [31, 42], [28, 36], [12, 35], [-1, 36], [-11, 36]];
-  const middleEast = [[30, 32], [45, 30], [55, 23], [49, 14], [39, 17], [31, 25], [30, 32]];
-  const madagascar = [[47, -12], [50, -17], [49, -25], [45, -23], [44, -16], [47, -12]];
-  const southAmerica = [[-82, 10], [-63, 8], [-45, -5], [-39, -22], [-52, -55], [-66, -45], [-76, -18], [-82, 10]];
+  ctx.fillStyle = "rgba(247, 245, 240, 0.9)";
+  ctx.strokeStyle = "rgba(17,17,17,0.22)";
+  ctx.lineWidth = 1.2;
+  [SOUTH_AMERICA_HINT, EURASIA_HINT, AFRICA_MAIN, MADAGASCAR].forEach((poly) => drawProjectedPolygon(ctx, cx, cy, radius, poly));
 
-  ctx.fillStyle = "rgba(247, 245, 240, 0.86)";
-  ctx.strokeStyle = "rgba(17,17,17,0.18)";
-  ctx.lineWidth = 1;
-  [southAmerica, europe, middleEast, africa, madagascar].forEach((poly) => drawProjectedPolygon(ctx, cx, cy, radius, poly));
+  ctx.strokeStyle = "rgba(242,85,40,0.22)";
+  ctx.lineWidth = 2.4;
+  drawProjectedLine(ctx, cx, cy, radius, AFRICA_MAIN);
 }
 
 function drawCountryPins(ctx, cx, cy, radius) {
