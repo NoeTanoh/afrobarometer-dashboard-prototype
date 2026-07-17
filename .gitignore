@@ -9,6 +9,8 @@ output/
 
 # Large downloaded source corpus
 data/raw/
+data/processed/*
+!data/processed/round10_dashboard_data.json
 
 # System files
 Thumbs.db
