@@ -1,4 +1,5 @@
 const DATA_URL = "./data/processed/round10_dashboard_data.json";
+const GEO_URL = "./data/geo/countries-110m.json";
 
 const METRICS = {
   right_direction_pct: {
@@ -147,6 +148,68 @@ const SOUTH_AMERICA_HINT = [
   [-82, 10],
 ];
 
+const AFRICA_FEATURE_NAMES = new Set([
+  "Algeria",
+  "Angola",
+  "Benin",
+  "Botswana",
+  "Burkina Faso",
+  "Burundi",
+  "Cameroon",
+  "Central African Rep.",
+  "Chad",
+  "Congo",
+  "Côte d'Ivoire",
+  "Dem. Rep. Congo",
+  "Djibouti",
+  "Egypt",
+  "Eq. Guinea",
+  "Eritrea",
+  "Ethiopia",
+  "Gabon",
+  "Gambia",
+  "Ghana",
+  "Guinea",
+  "Guinea-Bissau",
+  "Kenya",
+  "Lesotho",
+  "Liberia",
+  "Libya",
+  "Madagascar",
+  "Malawi",
+  "Mali",
+  "Mauritania",
+  "Morocco",
+  "Mozambique",
+  "Namibia",
+  "Niger",
+  "Nigeria",
+  "Rwanda",
+  "Senegal",
+  "Sierra Leone",
+  "Somalia",
+  "Somaliland",
+  "South Africa",
+  "S. Sudan",
+  "Sudan",
+  "Tanzania",
+  "Togo",
+  "Tunisia",
+  "Uganda",
+  "W. Sahara",
+  "Zambia",
+  "Zimbabwe",
+  "eSwatini",
+]);
+
+const DATA_TO_GEO_NAME = {
+  "Cabo Verde": "Cape Verde",
+  "Congo-Brazzaville": "Congo",
+  "Cote dIvoire": "Côte d'Ivoire",
+  "Sao Tome and Principe": "São Tomé and Principe",
+  "The Gambia": "Gambia",
+};
+
 const state = {
   metric: "right_direction_pct",
   country: "Malawi",
@@ -160,6 +223,8 @@ let store = {
   segments: [],
   regions: [],
   metadata: [],
+  geoFeatures: [],
+  africaFeatures: [],
 };
 
 const globe = {
@@ -218,14 +283,19 @@ init();
 async function init() {
   bindEvents();
   try {
-    const response = await fetch(DATA_URL);
+    const [response, geoResponse] = await Promise.all([fetch(DATA_URL), fetch(GEO_URL)]);
     if (!response.ok) throw new Error(`Data request failed: ${response.status}`);
     const data = await response.json();
+    const topology = geoResponse.ok ? await geoResponse.json() : null;
+    const geoFeatures =
+      topology && window.topojson ? window.topojson.feature(topology, topology.objects.countries).features : [];
     store = {
       countries: data.countries || [],
       segments: data.segments || [],
       regions: data.regions || [],
       metadata: data.metadata || [],
+      geoFeatures,
+      africaFeatures: geoFeatures.filter(isAfricaFeature),
     };
     populateControls();
     render();
@@ -405,6 +475,10 @@ function renderKpis(rows, focus) {
 }
 
 function renderMap(rows, focus) {
+  if (window.d3 && store.geoFeatures.length) {
+    renderRealAfricaMap(rows, focus);
+    return;
+  }
   const rowByCode = new Map(rows.map((row) => [row.country_code, row]));
   const width = 620;
   const height = 540;
@@ -440,6 +514,94 @@ function renderMap(rows, focus) {
   `;
 
   els.mapContainer.querySelectorAll(".country-node").forEach((node) => {
+    node.addEventListener("click", () => selectCountry(node.dataset.country));
+    node.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectCountry(node.dataset.country);
+      }
+    });
+  });
+
+  els.mapLegend.innerHTML = `
+    <span>Low</span>
+    <span class="legend-scale" aria-hidden="true"></span>
+    <span>High</span>
+    <strong>${escapeHtml(METRICS[state.metric].short)}</strong>
+  `;
+}
+
+function renderRealAfricaMap(rows, focus) {
+  const width = 620;
+  const height = 540;
+  const rowByName = new Map(store.countries.map((row) => [geoNameForCountry(row.country), row]));
+  const rowByCode = new Map(rows.map((row) => [row.country_code, row]));
+  const projection = d3.geoMercator().fitExtent(
+    [
+      [22, 18],
+      [width - 22, height - 18],
+    ],
+    { type: "FeatureCollection", features: store.africaFeatures }
+  );
+  const path = d3.geoPath(projection);
+
+  const countries = store.africaFeatures
+    .map((feature) => {
+      const naturalName = feature.properties?.name || "";
+      const row = rowByName.get(naturalName);
+      const active = row ? rowByCode.has(row.country_code) : false;
+      const selected = row?.country === focus.country;
+      const value = row?.[state.metric];
+      const tooltip = row
+        ? tooltipHtml(
+            displayCountry(row.country),
+            `${METRICS[state.metric].short}: ${formatPercent(value)}<br>Respondents: ${formatNumber(row.respondents)}`
+          )
+        : tooltipHtml(naturalName, "No Round 10 prototype data loaded");
+      return `
+        <path class="real-country ${selected ? "is-selected" : ""}" d="${path(feature)}"
+          data-country="${row ? escapeAttr(row.country) : ""}"
+          data-tooltip="${escapeAttr(tooltip)}"
+          tabindex="${row ? "0" : "-1"}"
+          role="${row ? "button" : "img"}"
+          fill="${row ? colorFor(value, METRICS[state.metric].polarity) : "#f7f8fb"}"
+          opacity="${row ? (active ? 0.9 : 0.28) : 0.72}"></path>
+      `;
+    })
+    .join("");
+
+  const dots = store.countries
+    .filter((row) => COORDS[row.country_code])
+    .map((row) => {
+      const projected = projection(COORDS[row.country_code]);
+      if (!projected) return "";
+      const [x, y] = projected;
+      const value = row[state.metric];
+      const active = rowByCode.has(row.country_code);
+      const selected = row.country === focus.country;
+      const tooltip = tooltipHtml(
+        displayCountry(row.country),
+        `${METRICS[state.metric].short}: ${formatPercent(value)}<br>Respondents: ${formatNumber(row.respondents)}`
+      );
+      return `
+        <g class="country-node" data-country="${escapeAttr(row.country)}" data-tooltip="${escapeAttr(tooltip)}" tabindex="0" role="button" aria-label="${escapeAttr(displayCountry(row.country))} ${formatPercent(value)}">
+          <circle class="country-dot ${selected ? "is-selected" : ""}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${selected ? 10 : 5.8}" fill="${colorFor(value, METRICS[state.metric].polarity)}" opacity="${active ? 1 : 0.2}"></circle>
+          ${selected || value >= 70 || value <= 15 ? `<text class="country-label" x="${(x + 10).toFixed(1)}" y="${(y - 8).toFixed(1)}">${escapeHtml(row.country_code)}</text>` : ""}
+        </g>
+      `;
+    })
+    .join("");
+
+  els.mapContainer.innerHTML = `
+    <svg id="africaMap" viewBox="0 0 ${width} ${height}" role="img" aria-label="Real map of African countries">
+      <rect width="${width}" height="${height}" fill="transparent"></rect>
+      <g>${countries}</g>
+      <g>${dots}</g>
+    </svg>
+  `;
+
+  els.mapContainer.querySelectorAll("[data-country]").forEach((node) => {
+    if (!node.dataset.country) return;
     node.addEventListener("click", () => selectCountry(node.dataset.country));
     node.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
@@ -866,6 +1028,18 @@ function flatProject(lon, lat) {
   return [(lon + 26) * 7.85, (36 - lat) * 7.25];
 }
 
+function isAfricaFeature(feature) {
+  const name = feature?.properties?.name || "";
+  if (AFRICA_FEATURE_NAMES.has(name)) return true;
+  if (!window.d3) return false;
+  const [lon, lat] = d3.geoCentroid(feature);
+  return lon >= -26 && lon <= 58 && lat >= -36 && lat <= 38 && !["Saudi Arabia", "Yemen", "Oman", "Iran", "Iraq"].includes(name);
+}
+
+function geoNameForCountry(country) {
+  return DATA_TO_GEO_NAME[country] || country;
+}
+
 function showToast(message) {
   els.toast.textContent = message;
   els.toast.classList.add("is-visible");
@@ -901,6 +1075,10 @@ function animateGlobe() {
 
 function drawGlobe() {
   if (!globe.ctx) return;
+  if (window.d3 && store.geoFeatures.length) {
+    drawRealGlobe();
+    return;
+  }
   const canvas = globe.canvas;
   const ctx = globe.ctx;
   const width = canvas.width;
@@ -942,6 +1120,103 @@ function drawGlobe() {
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
   ctx.stroke();
+}
+
+function drawRealGlobe() {
+  const canvas = globe.canvas;
+  const ctx = globe.ctx;
+  const width = canvas.width;
+  const height = canvas.height;
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = Math.min(width, height) * 0.41;
+  const projection = d3.geoOrthographic()
+    .translate([cx, cy])
+    .scale(radius)
+    .rotate([-globe.currentLon, -globe.currentLat])
+    .clipAngle(90);
+  const path = d3.geoPath(projection, ctx);
+  const graticule = d3.geoGraticule10();
+  const focus = getCountry(state.country);
+  const focusName = focus ? geoNameForCountry(focus.country) : "";
+
+  ctx.clearRect(0, 0, width, height);
+
+  const ocean = ctx.createRadialGradient(cx - radius * 0.34, cy - radius * 0.38, radius * 0.08, cx, cy, radius * 1.06);
+  ocean.addColorStop(0, "#eef8ff");
+  ocean.addColorStop(0.23, "#9fbdd0");
+  ocean.addColorStop(0.62, "#31576e");
+  ocean.addColorStop(1, "#0b2030");
+  ctx.fillStyle = ocean;
+  ctx.beginPath();
+  path({ type: "Sphere" });
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  path(graticule);
+  ctx.stroke();
+
+  store.geoFeatures.forEach((feature) => {
+    const name = feature.properties?.name || "";
+    const isAfrica = isAfricaFeature(feature);
+    const matchedRow = store.countries.find((row) => geoNameForCountry(row.country) === name);
+    const selected = name === focusName;
+    ctx.beginPath();
+    path(feature);
+    ctx.fillStyle = selected
+      ? "rgba(242, 85, 40, 0.96)"
+      : isAfrica
+        ? "rgba(248, 247, 242, 0.96)"
+        : "rgba(248, 247, 242, 0.46)";
+    ctx.fill();
+    ctx.strokeStyle = selected ? "rgba(255,255,255,0.95)" : isAfrica ? "rgba(17,17,17,0.24)" : "rgba(255,255,255,0.2)";
+    ctx.lineWidth = selected ? 2.2 : matchedRow ? 0.9 : 0.55;
+    ctx.stroke();
+  });
+
+  drawRealGlobePins(ctx, projection, focus);
+
+  const shade = ctx.createRadialGradient(cx - radius * 0.4, cy - radius * 0.45, radius * 0.08, cx + radius * 0.22, cy + radius * 0.18, radius * 1.08);
+  shade.addColorStop(0, "rgba(255,255,255,0.45)");
+  shade.addColorStop(0.46, "rgba(255,255,255,0)");
+  shade.addColorStop(1, "rgba(0,0,0,0.42)");
+  ctx.fillStyle = shade;
+  ctx.beginPath();
+  path({ type: "Sphere" });
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.58)";
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  path({ type: "Sphere" });
+  ctx.stroke();
+}
+
+function drawRealGlobePins(ctx, projection, focus) {
+  store.countries.forEach((country) => {
+    const coord = COORDS[country.country_code];
+    if (!coord) return;
+    const projected = projection(coord);
+    if (!projected) return;
+    const [x, y] = projected;
+    const selected = focus && country.country === focus.country;
+    ctx.fillStyle = selected ? "#ffffff" : "rgba(17,17,17,0.42)";
+    ctx.strokeStyle = selected ? "#f25528" : "rgba(255,255,255,0.86)";
+    ctx.lineWidth = selected ? 4 : 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, selected ? 8 : 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    if (selected) {
+      ctx.strokeStyle = "rgba(242,85,40,0.28)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, 22, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  });
 }
 
 function drawGraticule(ctx, cx, cy, radius) {

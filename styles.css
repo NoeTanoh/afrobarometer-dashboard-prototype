@@ -616,6 +616,20 @@ article,
   stroke-width: 2;
 }
 
+.real-country {
+  stroke: rgba(17, 17, 17, 0.2);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
+  transition: opacity 160ms ease, fill 160ms ease, stroke 160ms ease;
+}
+
+.real-country:hover,
+.real-country.is-selected {
+  opacity: 1;
+  stroke: var(--ink);
+  stroke-width: 1.4;
+}
+
 .country-dot {
   stroke: #fff;
   stroke-width: 2.5;
