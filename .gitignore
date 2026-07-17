@@ -1,0 +1,15 @@
+# Browser/test artifacts
+.playwright-cli/
+
+# Temporary working files
+tmp/
+
+# Generated proposal/screenshot artifacts kept locally
+output/
+
+# Large downloaded source corpus
+data/raw/
+
+# System files
+Thumbs.db
+.DS_Store
